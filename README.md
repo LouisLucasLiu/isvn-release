@@ -100,7 +100,7 @@ isvn create rtl/cpu/RTL/v1 --parent ROOT
 
 iSVN is source-available under the
 [PolyForm Shield License 1.0.0](https://polyformproject.org/licenses/shield/1.0.0);
-see [`LICENSE`](LICENSE). This is not an OSI-approved open-source license.
+see [`LICENSE`](LICENSE).
 
 Third-party components keep their own licenses; see
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
@@ -194,6 +194,6 @@ isvn create rtl/cpu/RTL/v1 --parent ROOT
 ### 授權
 
 iSVN 以 [PolyForm Shield License 1.0.0](https://polyformproject.org/licenses/shield/1.0.0)
-提供原始碼（source-available），條款見 [`LICENSE`](LICENSE)。這不是 OSI 認可的開源授權。
+提供原始碼（source-available），條款見 [`LICENSE`](LICENSE)。
 
 第三方元件維持各自的授權，見 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
