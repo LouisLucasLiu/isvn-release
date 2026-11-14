@@ -1,0 +1,126 @@
+#!/bin/sh
+# Checks the external Qt root an iSVN installation uses.  It installs and
+# changes nothing.
+#
+#   isvn-qt-check [--qt-dir <Qt root>] [--prefix <iSVN directory>]
+#
+# --prefix defaults to the directory of this script; --qt-dir defaults to the
+# target of <prefix>/qt.  Exit status: 0 usable, 1 a check failed.
+set -u
+self=$(readlink -f -- "$0")
+prefix=${self%/*}
+qt_dir=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --qt-dir) qt_dir=${2:-}; shift 2 ;;
+        --prefix) prefix=${2:-}; shift 2 ;;
+        *) echo "usage: isvn-qt-check [--qt-dir <Qt root>] [--prefix <iSVN directory>]" >&2; exit 2 ;;
+    esac
+done
+fail=0
+pass() { printf '[PASS] %s\n' "$*"; }
+bad()  { printf '[FAIL] %s\n' "$*"; fail=1; }
+
+# System package that provides a missing SONAME, for the administrator.
+hint() {
+    case "$1" in
+        libxcb-cursor.so.0)      echo "EL9: xcb-util-cursor; Ubuntu 24.04: libxcb-cursor0" ;;
+        libxcb-icccm.so.4)       echo "EL9: xcb-util-wm; Ubuntu 24.04: libxcb-icccm4" ;;
+        libxcb-image.so.0)       echo "EL9: xcb-util-image; Ubuntu 24.04: libxcb-image0" ;;
+        libxcb-keysyms.so.1)     echo "EL9: xcb-util-keysyms; Ubuntu 24.04: libxcb-keysyms1" ;;
+        libxcb-render-util.so.0) echo "EL9: xcb-util-renderutil; Ubuntu 24.04: libxcb-render-util0" ;;
+        libxcb-util.so.1)        echo "EL9: xcb-util; Ubuntu 24.04: libxcb-util1" ;;
+        libxkbcommon-x11.so.0)   echo "EL9: libxkbcommon-x11; Ubuntu 24.04: libxkbcommon-x11-0" ;;
+        libxkbcommon.so.0)       echo "EL9: libxkbcommon; Ubuntu 24.04: libxkbcommon0" ;;
+        libX11-xcb.so.1)         echo "EL9: libX11-xcb; Ubuntu 24.04: libx11-xcb1" ;;
+        libX11.so.6)             echo "EL9: libX11; Ubuntu 24.04: libx11-6" ;;
+        libxcb*.so.*)            echo "EL9: libxcb; Ubuntu 24.04: the libxcb package providing $1" ;;
+        libGL.so.1|libGLX.so.0)  echo "EL9: libglvnd-glx; Ubuntu 24.04: libgl1 / libglx0" ;;
+        libEGL.so.1)             echo "EL9: libglvnd-egl; Ubuntu 24.04: libegl1" ;;
+        libOpenGL.so.0)          echo "EL9: libglvnd-opengl; Ubuntu 24.04: libopengl0" ;;
+        libfontconfig.so.1)      echo "EL9: fontconfig; Ubuntu 24.04: libfontconfig1" ;;
+        libfreetype.so.6)        echo "EL9: freetype; Ubuntu 24.04: libfreetype6" ;;
+        libdbus-1.so.3)          echo "EL9: dbus-libs; Ubuntu 24.04: libdbus-1-3" ;;
+        libglib-2.0.so.0|libgthread-2.0.so.0) echo "EL9: glib2; Ubuntu 24.04: libglib2.0-0t64" ;;
+        *) echo "ask the administrator for the package that provides this SONAME" ;;
+    esac
+}
+
+if [ -z "$qt_dir" ]; then
+    if [ -L "$prefix/qt" ]; then qt_dir=$(readlink -- "$prefix/qt")
+    else bad "no --qt-dir given and $prefix/qt is not a symlink to a Qt root"; echo "Qt check failed."; exit 1; fi
+fi
+case "$qt_dir" in /*) ;; *) qt_dir="$PWD/$qt_dir" ;; esac
+if [ ! -d "$qt_dir" ]; then
+    bad "Qt root does not exist or is a broken link: $qt_dir"; echo "Qt check failed."; exit 1
+fi
+canonical=$(readlink -f -- "$qt_dir")
+echo "Qt root: $qt_dir"
+echo "canonical: $canonical"
+
+want=""
+[ -r "$prefix/libexec/isvn-gui.qt-version" ] && want=$(cat "$prefix/libexec/isvn-gui.qt-version")
+found=""
+for f in "$canonical/lib/cmake/Qt6/Qt6ConfigVersionImpl.cmake" "$canonical/lib/cmake/Qt6/Qt6ConfigVersion.cmake"; do
+    [ -r "$f" ] || continue
+    found=$(sed -n 's/.*set(PACKAGE_VERSION "\([0-9.]*\)").*/\1/p' "$f" | head -n 1)
+    [ -n "$found" ] && break
+done
+if [ -z "$found" ]; then
+    bad "cannot read the Qt version under $canonical/lib/cmake/Qt6 (is this a Qt 6 root such as .../Qt/6.7.3/gcc_64?)"
+elif [ -n "$want" ] && [ "$found" != "$want" ]; then
+    bad "Qt $found found; this iSVN build was made and validated with Qt $want only"
+else
+    pass "Qt $found"
+fi
+
+missing=0
+while IFS= read -r rel; do
+    case "$rel" in ''|'#'*) continue ;; esac
+    if [ ! -e "$canonical/$rel" ]; then bad "missing in the Qt root: $rel"; missing=$((missing + 1)); fi
+done < "$prefix/share/qt-requirements.txt"
+[ $missing -eq 0 ] && pass "libraries, QML modules and platform plugins iSVN needs are present"
+
+# Run ldd without a caller-supplied library path, as the GUI is started.
+xcb="$canonical/plugins/platforms/libqxcb.so"
+if [ -e "$xcb" ]; then
+    out=$(env -u LD_LIBRARY_PATH LC_ALL=C ldd "$xcb" 2>&1)
+    nf=$(printf '%s\n' "$out" | awk '/=> not found/{print $1}' | sort -u)
+    if [ -n "$nf" ]; then
+        for s in $nf; do bad "system library $s is missing ($(hint "$s"))"; done
+    fi
+    if printf '%s\n' "$out" | grep -q "version .* not found"; then
+        bad "this Qt needs a newer system C/C++ runtime than this OS provides (cross-ABI Qt):"
+        printf '%s\n' "$out" | grep "version .* not found" | sed 's/^/       /'
+    fi
+    [ -z "$nf" ] && ! printf '%s\n' "$out" | grep -q "version .* not found" && pass "xcb platform plugin resolves all system libraries"
+fi
+
+if [ -e "$prefix/libexec/isvn-gui" ] && [ -L "$prefix/qt" ]; then
+    link=$(readlink -f -- "$prefix/qt")
+    if [ "$link" != "$canonical" ]; then
+        bad "$prefix/qt points to $link, not to $canonical"
+    else
+        pass "$prefix/qt -> $canonical"
+    fi
+    conf="$prefix/libexec/qt.conf"
+    if [ "$(grep -v '^[[:space:]]*$' "$conf" 2>/dev/null)" = "$(printf '[Paths]\nPrefix=../qt')" ] && [ ! -e "$prefix/libexec/qt6.conf" ]; then
+        pass "libexec/qt.conf: Prefix=../qt"
+    else
+        bad "libexec/qt.conf must contain exactly [Paths] Prefix=../qt (and no qt6.conf may exist)"
+    fi
+    # Every Qt library the GUI loads must come from the shared root.
+    out=$(env -u LD_LIBRARY_PATH LC_ALL=C ldd "$prefix/libexec/isvn-gui" 2>&1)
+    foreign=$(printf '%s\n' "$out" | awk '/libQt6|libicu/ && /=>/ {print $3}' | while read -r p; do
+        r=$(readlink -f -- "$p" 2>/dev/null); case "$r" in "$canonical"/*) ;; *) echo "$p" ;; esac; done)
+    if printf '%s\n' "$out" | grep -q 'not found'; then
+        bad "GUI has unresolved libraries: $(printf '%s\n' "$out" | awk '/not found/{print $1}' | tr '\n' ' ')"
+    elif [ -n "$foreign" ]; then
+        bad "GUI would load Qt from outside the shared root: $foreign"
+    else
+        pass "GUI loads every Qt library from the shared root"
+    fi
+fi
+
+if [ $fail -eq 0 ]; then echo "Qt check passed."; else echo "Qt check failed; fix the [FAIL] lines above."; fi
+exit $fail

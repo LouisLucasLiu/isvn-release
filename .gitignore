@@ -1,0 +1,17 @@
+/build/
+/cmake-build-*/
+
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+Testing/
+build.ninja
+cmake_install.cmake
+compile_commands.json
+*.ninja
+*.ninja_deps
+*.ninja_log
+/build-gui/
+
+# Local CMake build outputs
+/build-release/

@@ -1,0 +1,50 @@
+#!/bin/sh
+# Starts the iSVN GUI against the external Qt this installation is linked to.
+# The GUI binary finds Qt through its RUNPATH ($ORIGIN/../qt/lib)
+# and libexec/qt.conf (Prefix=../qt); nothing here sets a library path.
+# Plugin/QML overrides from the caller are cleared, and caller library-path
+# entries that hold another Qt are dropped, because they would win over RUNPATH.
+set -eu
+
+self=$(readlink -f -- "$0")
+dir=${self%/*}
+gui="$dir/libexec/isvn-gui"
+qt="$dir/qt"
+
+fail() {
+    printf 'isvn-gui: %s\n' "$*" >&2
+    exit 127
+}
+
+[ -x "$gui" ] || fail "GUI binary not found: $gui"
+want=""
+[ -r "$gui.qt-version" ] && want=$(cat "$gui.qt-version")
+
+[ -e "$qt/lib/libQt6Core.so.6" ] ||
+    fail "Qt ${want:-6} is not configured for this installation ($qt)." \
+         "Run '$dir/isvn-qt-check' for details, or reinstall with 'install.sh --qt-dir <Qt ${want:-6} gcc_64 root>'."
+if [ -n "$want" ]; then
+    core=$(readlink -f -- "$qt/lib/libQt6Core.so.6")
+    case "$core" in
+        *".so.$want") ;;
+        *) fail "Qt version mismatch: built with Qt $want, but $qt provides ${core##*/}" ;;
+    esac
+fi
+
+unset QT_PLUGIN_PATH QML_IMPORT_PATH QML2_IMPORT_PATH QT_QPA_PLATFORM_PLUGIN_PATH
+if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+    shared=$(readlink -f -- "$qt/lib")
+    kept=""
+    old_ifs=$IFS; IFS=:
+    for entry in $LD_LIBRARY_PATH; do
+        if [ -n "$entry" ] && [ -e "$entry/libQt6Core.so.6" ] && [ "$(readlink -f -- "$entry")" != "$shared" ]; then
+            printf 'isvn-gui: ignoring another Qt on LD_LIBRARY_PATH: %s\n' "$entry" >&2
+            continue
+        fi
+        kept="${kept:+$kept:}$entry"
+    done
+    IFS=$old_ifs
+    if [ -n "$kept" ]; then LD_LIBRARY_PATH=$kept; export LD_LIBRARY_PATH; else unset LD_LIBRARY_PATH; fi
+fi
+
+exec "$gui" "$@"

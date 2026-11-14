@@ -1,0 +1,11 @@
+#!/bin/sh
+# Runs the bundled Subversion tool of the same name with the bundled
+# Subversion libraries.  The library path is set for this process only.
+set -eu
+self=$(readlink -f -- "$0")
+bin=${self%/*}
+root=${bin%/*}
+tool=${self##*/}
+LD_LIBRARY_PATH="$root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH
+exec "$root/libexec/$tool" "$@"

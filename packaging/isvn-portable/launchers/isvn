@@ -1,0 +1,10 @@
+#!/bin/sh
+# Runs the bundled isvn CLI with the bundled Subversion tools first on PATH,
+# so isvn never picks up a different svn, svnadmin or svnmucc.  The GUI runs
+# this same file as its paired CLI.
+set -eu
+self=$(readlink -f -- "$0")
+dir=${self%/*}
+PATH="$dir/svn/bin${PATH:+:$PATH}"
+export PATH
+exec "$dir/libexec/isvn" "$@"

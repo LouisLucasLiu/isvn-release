@@ -1,0 +1,42 @@
+#!/bin/sh
+# Checks that this machine can run this iSVN installation and says what is
+# missing.  It changes nothing.  Exit status: 0 ready, 1 a blocker was found.
+#   isvn-preflight [--verify-files]
+set -u
+self=$(readlink -f -- "$0")
+dir=${self%/*}
+fail=0
+ok()   { printf '  OK    %s\n' "$*"; }
+warn() { printf '  WARN  %s\n' "$*"; }
+bad()  { printf '  FAIL  %s\n' "$*"; fail=1; }
+
+echo "iSVN preflight: $dir"
+arch=$(uname -m)
+[ "$arch" = x86_64 ] && ok "architecture $arch" || bad "architecture $arch (this package is for x86_64)"
+glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')
+case "$glibc" in
+    2.3[4-9]*|2.[4-9][0-9]*) ok "glibc $glibc (2.34 or newer required)" ;;
+    "") warn "cannot read the glibc version" ;;
+    *) bad "glibc $glibc is older than 2.34" ;;
+esac
+if [ "${1:-}" = --verify-files ]; then
+    if (cd "$dir" && sha256sum --quiet -c SHA256SUMS >/dev/null 2>&1); then ok "all files match SHA256SUMS"
+    else bad "some files do not match SHA256SUMS (damaged or modified package)"; fi
+fi
+if out=$("$dir/isvn" version --json 2>&1); then ok "isvn CLI runs: $out"
+else bad "isvn CLI does not run: $out"; fi
+for t in svn svnadmin svnmucc; do
+    # svnmucc has no --quiet; the first line of --version works for all three.
+    if v=$("$dir/svn/bin/$t" --version 2>&1); then ok "bundled $(printf '%s\n' "$v" | head -n 1)"
+    else bad "bundled $t does not run: $v"; fi
+done
+echo "  ---- shared Qt (isvn-qt-check) ----"
+if "$dir/isvn-qt-check" --prefix "$dir" | sed 's/^/  /'; then :; fi
+"$dir/isvn-qt-check" --prefix "$dir" >/dev/null 2>&1 || fail=1
+if [ -n "${DISPLAY:-}" ]; then ok "DISPLAY=$DISPLAY"
+elif [ -n "${WAYLAND_DISPLAY:-}" ]; then warn "Wayland session without DISPLAY; the GUI uses X11 (XWayland)"
+else warn "no DISPLAY: the GUI needs a graphical session (the CLI works without one)"; fi
+command -v python3 >/dev/null 2>&1 && ok "python3 $(python3 -c 'import sys; print(sys.version.split()[0])') (needed by the Local Demo Kit)" ||
+    warn "python3 not found: iSVN works, but the Local Demo Kit scripts need python3"
+if [ $fail = 0 ]; then echo "Ready."; else echo "Not ready: fix the FAIL lines above."; fi
+exit $fail
